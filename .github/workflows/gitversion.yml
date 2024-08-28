@@ -20,7 +20,10 @@ env:
   GITVERSION_TAG_PROPERTY_HOTFIX: .MajorMinorPatch,.PreReleaseLabelWithDash
   GITVERSION_TAG_PROPERTY_MAIN: .MajorMinorPatch
 
+permissions: write-all
+
 jobs:
+
   gitversion:
     name: gitversion
     runs-on: ubuntu-latest
