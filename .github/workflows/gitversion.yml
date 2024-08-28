@@ -25,8 +25,8 @@ jobs:
     name: gitversion
     runs-on: ubuntu-18.04
     steps:
-    - name: Checkout
-      uses: actions/checkout@v2
+    - name: GitTools
+      uses: GitTools/actions@v3.0.0
 
     - name: Fetch all history for all tags and branches
       run: git fetch --unshallow && git checkout dev && git checkout main
