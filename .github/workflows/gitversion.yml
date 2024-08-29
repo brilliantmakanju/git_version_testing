@@ -112,11 +112,9 @@ jobs:
           -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
           "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER"
 
-    - name: Tag
-      # if: ${{ startsWith(steps.calculate_changed_services.outputs.diff_dest, 'release') || startsWith(steps.calculate_changed_services.outputs.diff_dest, 'hotfix') || contains(env.MAIN_BRANCHES, steps.calculate_changed_services.outputs.diff_dest) }}
-      id: 'tag'
+    - name: Tag build
+      if: ${{ startsWith(steps.calculate_changed_services.outputs.diff_dest, 'release') || startsWith(steps.calculate_changed_services.outputs.diff_dest, 'hotfix') || contains(env.MAIN_BRANCHES, steps.calculate_changed_services.outputs.diff_dest) }}
       run: |
-
         if [ "${GITHUB_EVENT_NAME}" = 'push' ]; then
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions"
