@@ -1,0 +1,135 @@
+name: Version and Release Management
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+      - 'release/**'
+      - 'hotfix/**'
+  pull_request:
+    branches:
+      - dev
+      - main
+
+env:
+  GITVERSION: 'gittools/gitversion:5.10.0-alpine.3.14-6.0'
+  MAIN_BRANCHES: '["dev", "main"]'  # JSON string format
+  GITVERSION_TAG_PROPERTY_PULL_REQUESTS: .SemVer
+  GITVERSION_TAG_PROPERTY_DEFAULT: .SemVer
+  GITVERSION_TAG_PROPERTY_DEVELOP: .MajorMinorPatch,.PreReleaseLabelWithDash
+  GITVERSION_TAG_PROPERTY_RELEASE: .MajorMinorPatch,.PreReleaseLabelWithDash
+  GITVERSION_TAG_PROPERTY_HOTFIX: .MajorMinorPatch,.PreReleaseLabelWithDash
+  GITVERSION_TAG_PROPERTY_MAIN: .MajorMinorPatch
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  versioning-and-release:
+    name: Versioning and Release Management
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      create_release: ${{ steps.check_branch.outputs.create_release }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Fetch all history for all tags and branches
+      run: git fetch --unshallow && git checkout dev && git checkout main
+
+    - name: Checkout to branch
+      run: |
+        if [ "${GITHUB_EVENT_NAME}" = 'push' ]; then
+          DIFF_DEST="${GITHUB_REF_NAME}"
+        else
+          DIFF_DEST="${GITHUB_HEAD_REF}"
+        fi
+        git checkout ${DIFF_DEST}
+
+    - name: Calculate changed services
+      id: calculate_changed_services
+      run: |
+        if [ "${GITHUB_EVENT_NAME}" = 'push' ]; then
+          DIFF_DEST="${GITHUB_REF_NAME}"
+          DIFF_SOURCE=$(git rev-parse "${DIFF_DEST}"^1)
+        else
+          DIFF_DEST="${GITHUB_HEAD_REF}"
+          DIFF_SOURCE="${GITHUB_BASE_REF}"
+        fi
+        # use main as source if current branch is a release branch
+        if [[ "${DIFF_DEST}" == release/* ]] || [[ "${DIFF_DEST}" == hotfix/* ]]; then
+          DIFF_SOURCE="main"
+        fi
+
+        # service change calculation
+        if [ "$(git diff "${DIFF_SOURCE}" "${DIFF_DEST}" --name-only | grep -o '^common/' > /dev/null && echo 'common changed')" = 'common changed' ]; then
+          changed_services=$(ls -1 apps | xargs -n 1 printf 'apps/%s\n')
+        else
+          changed_services=$(git diff "${DIFF_SOURCE}" "${DIFF_DEST}" --name-only | grep -o '^apps/[a-zA-Z-]*' | sort | uniq)
+        fi
+        changed_services=$(printf '%s' "$changed_services" | jq --raw-input --slurp '.')
+        echo "changed_services=$changed_services" >> $GITHUB_OUTPUT
+        echo "DIFF_SOURCE=$DIFF_SOURCE" >> $GITHUB_OUTPUT
+        echo "DIFF_DEST=$DIFF_DEST" >> $GITHUB_OUTPUT
+
+    - name: Calculate service versions
+      id: calculate_service_versions
+      run: |
+        changed_services=( ${{ fromJSON(steps.calculate_changed_services.outputs.changed_services) }} )
+        if [ "${#changed_services[@]}" = "0" ]; then
+          service_versions_txt='## impact surface\nNo services changed\n'
+        else
+          service_versions_txt="## impact surface\n"
+          for svc in "${changed_services[@]}"; do
+            echo "calculation for ${svc}"
+            gitversion_calc=$(docker run --rm -v "$(pwd):/repo" ${GITVERSION} /repo /config "/repo/${svc}/.gitversion.yml")
+            GITVERSION_TAG_PROPERTY_NAME="GITVERSION_TAG_PROPERTY_PULL_REQUESTS"
+            GITVERSION_TAG_PROPERTY=${!GITVERSION_TAG_PROPERTY_NAME}
+            service_version=$(echo "${gitversion_calc}" | jq -r "[${GITVERSION_TAG_PROPERTY}] | join(\"\")")
+            service_versions_txt+="- ${svc} - v${service_version}\n"
+          done
+        fi
+        PR_BODY="${service_versions_txt}"
+        PR_BODY=$(printf '%s' "$PR_BODY" | jq --raw-input --slurp '.')
+        echo "${PR_BODY}"
+        echo "PR_BODY=$PR_BODY" >> $GITHUB_OUTPUT
+
+    - name: Update PR description
+      if: ${{ github.event_name == 'pull_request' }}
+      run: |
+        PR_NUMBER=$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }')
+        OWNER=${{ github.repository_owner }}
+        REPO=$(echo ${{ github.repository }} | awk -F "/" '{print $2}')
+        jq -nc '{"body": "${{ fromJSON(steps.calculate_service_versions.outputs.PR_BODY) }}" }' | \
+        curl -sL -X PATCH -d @- \
+        -H "Accept: application/vnd.github+json" \
+        -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        "https://api.github.com/repos/$OWNER/$REPO/pulls/$PR_NUMBER"
+
+    - name: Check if the branch is in MAIN_BRANCHES
+      id: check_branch
+      run: |
+        if echo "${{ github.ref_name }}" | jq -R -e '. as $branch | $MAIN_BRANCHES | index($branch)' > /dev/null; then
+          echo "Branch ${GITHUB_REF_NAME} is in MAIN_BRANCHES"
+          echo "create_release=true" >> $GITHUB_ENV
+        else
+          echo "Branch ${GITHUB_REF_NAME} is not in MAIN_BRANCHES"
+          echo "create_release=false" >> $GITHUB_ENV
+        fi
+
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: versioning-and-release
+    if: ${{ needs.versioning-and-release.outputs.create_release == 'true' }}
+    steps:
+    - name: Create Release
+      uses: dexwritescode/release-on-merge-action@v1
+      with:
+        version-increment-strategy: ${{ github.event.inputs.version-increment-strategy || 'patch' }}
+        initial-version: '1.0.0'
+        tag-prefix: 'v'
+        body: 'Automatic release created by GitHub Actions'
+        generate-release-notes: true
