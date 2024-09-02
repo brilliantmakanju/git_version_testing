@@ -1,6 +1,3 @@
-
-
-
 name: Version and Release Management
 
 on:
@@ -117,7 +114,8 @@ jobs:
       id: check_branch
       run: |
         BRANCH_NAME="${GITHUB_REF_NAME}"
-        if echo "${BRANCH_NAME}" | jq -R -e ". as \$branch | \$MAIN_BRANCHES | index(\$branch)" > /dev/null; then
+        MAIN_BRANCHES_JSON="${{ env.MAIN_BRANCHES }}"
+        if echo "${BRANCH_NAME}" | jq -R -e ". as \$branch | \$MAIN_BRANCHES | index(\$branch)" --argjson MAIN_BRANCHES "${MAIN_BRANCHES_JSON}" > /dev/null; then
           echo "Branch ${BRANCH_NAME} is in MAIN_BRANCHES"
           echo "create_release=true" >> $GITHUB_ENV
         else
@@ -132,4 +130,3 @@ jobs:
         script: |
           const { exec } = require('@actions/exec');
           await exec('gh workflow run create-release.yml --ref ${{ github.ref }}', { silent: true });
-
