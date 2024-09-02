@@ -1,14 +1,14 @@
 on:
   pull_request:
     branches:
-    - dev
-    - main
+      - dev
+      - main
   push:
     branches:
-    - dev
-    - main
-    - 'release/**'
-    - 'hotfix/**'
+      - dev
+      - main
+      - 'release/**'
+      - 'hotfix/**'
 
 env:
   GITVERSION: 'gittools/gitversion:5.10.0-alpine.3.14-6.0'
@@ -23,7 +23,9 @@ env:
 jobs:
   gitversion:
     name: gitversion
-    runs-on: ubuntu-20.04.6
+    runs-on: ubuntu-latest
+    permissions: write-all
+    
     steps:
     - name: Checkout
       uses: actions/checkout@v2
@@ -69,9 +71,9 @@ jobs:
           changed_services=`git diff "${DIFF_SOURCE}" "${DIFF_DEST}" --name-only | grep -o '^apps/[a-zA-Z-]*' | sort | uniq`
         fi
         changed_services=$(printf '%s' "$changed_services" | jq --raw-input --slurp '.')
-        echo "::set-output name=changed_services::$changed_services"
-        echo "::set-output name=diff_source::$DIFF_SOURCE"
-        echo "::set-output name=diff_dest::$DIFF_DEST"
+        echo "changed_services=$changed_services" >> $GITHUB_OUTPUT
+        echo "diff_source=$DIFF_SOURCE" >> $GITHUB_OUTPUT
+        echo "diff_dest=$DIFF_DEST" >> $GITHUB_OUTPUT
         echo "DIFF_SOURCE='$DIFF_SOURCE'"
         echo "DIFF_DEST='$DIFF_DEST'"
         echo "changed_services='$(echo "$changed_services" | sed 'N;s/\n/, /g')'"
@@ -99,57 +101,51 @@ jobs:
         PR_BODY="${service_versions_txt}"
         PR_BODY=$(printf '%s' "$PR_BODY" | jq --raw-input --slurp '.')
         echo "${PR_BODY}"
-        echo "::set-output name=PR_BODY::$PR_BODY"
+        echo "PR_BODY=$PR_BODY" >> $GITHUB_OUTPUT
+
 
     - name: Update PR description
       if: ${{ github.event_name == 'pull_request' }}
       run: |
         PR_NUMBER=$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }')
+        OWNER=${{ github.repository_owner }}
+        REPO=$(echo ${{ github.repository }} | awk -F "/" '{print $2}')
         # from https://github.com/actions/checkout/issues/58#issuecomment-614041550
         jq -nc '{"body": "${{ fromJSON(steps.calculate_service_versions.outputs.PR_BODY) }}" }' | \
-        curl -sL  -X PATCH -d @- \
-          -H "Content-Type: application/json" \
-          -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-          "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER"
+        curl -sL -X PATCH -d @- \
+        -H "Accept: application/vnd.github+json" \
+        -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        "https://api.github.com/repos/$OWNER/$REPO/pulls/$PR_NUMBER"
 
     - name: Tag build
-      if: ${{ startsWith(steps.calculate_changed_services.outputs.diff_dest, 'release') || startsWith(steps.calculate_changed_services.outputs.diff_dest, 'hotfix') || contains(env.MAIN_BRANCHES, steps.calculate_changed_services.outputs.diff_dest) }}
+      if: ${{ github.event_name == 'push' && (startsWith(steps.calculate_changed_services.outputs.diff_dest, 'release') || startsWith(steps.calculate_changed_services.outputs.diff_dest, 'hotfix') || contains(env.MAIN_BRANCHES, steps.calculate_changed_services.outputs.diff_dest)) }}
       run: |
-        if [ "${GITHUB_EVENT_NAME}" = 'push' ]; then
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions"
-
-          echo "Changed services: ${{ steps.calculate_changed_services.outputs.changed_services }}"
-
-          changed_services=( ${{ fromJSON(steps.calculate_changed_services.outputs.changed_services) }} )
-          if [ ${#changed_services[@]} -eq 0 ]; then
-            echo "No changed services detected."
+        # https://github.com/orgs/community/discussions/26560
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "github-actions"
+        changed_services=( ${{ fromJSON(steps.calculate_changed_services.outputs.changed_services) }} )
+        for svc in "${changed_services[@]}"; do
+          echo "calculation for ${svc}"
+          docker run --rm -v "$(pwd):/repo" ${GITVERSION} /repo /config "/repo/${svc}/.gitversion.yml"
+          gitversion_calc=$(docker run --rm -v "$(pwd):/repo" ${GITVERSION} /repo /config "/repo/${svc}/.gitversion.yml")
+          GITVERSION_TAG_PROPERTY_NAME="GITVERSION_TAG_PROPERTY_$(echo '${{ steps.calculate_changed_services.outputs.diff_dest }}' | sed 's|/.*$||' | tr '[[:lower:]]' '[[:upper:]]')"
+          GITVERSION_TAG_PROPERTY=${!GITVERSION_TAG_PROPERTY_NAME}
+          svc_without_prefix=$(echo "${svc}" | sed "s|^apps/||")
+          service_version=$(echo "${gitversion_calc}" | jq -r "[${GITVERSION_TAG_PROPERTY}] | join(\"\")")
+          if [ "${GITVERSION_TAG_PROPERTY}" != ".MajorMinorPatch" ]; then
+            echo tag_filter "^${svc_without_prefix}/v$(echo "${gitversion_calc}" | jq -r ".MajorMinorPatch")-$(echo "${gitversion_calc}" | jq -r ".PreReleaseLabel")"
+            echo tags with tag_filter "$(git tag -l | grep "^${svc_without_prefix}/v$(echo "${gitversion_calc}" | jq -r ".MajorMinorPatch")-$(echo "${gitversion_calc}" | jq -r ".PreReleaseLabel")")"
+            echo tags grepped on commit count "$(git tag -l | grep "^${svc_without_prefix}/v$(echo "${gitversion_calc}" | jq -r ".MajorMinorPatch")-$(echo "${gitversion_calc}" | jq -r ".PreReleaseLabel")" | grep -o -E '\.[0-9]+$')"
+            echo tags grepped on commit count and period removed "$(git tag -l | grep "^${svc_without_prefix}/v$(echo "${gitversion_calc}" | jq -r ".MajorMinorPatch")-$(echo "${gitversion_calc}" | jq -r ".PreReleaseLabel")" | grep -o -E '\.[0-9]+$' | grep -o -E '[0-9]+$')"
+            previous_commit_count=$(git tag -l | grep "^${svc_without_prefix}/v$(echo "${gitversion_calc}" | jq -r ".MajorMinorPatch")-$(echo "${gitversion_calc}" | jq -r ".PreReleaseLabel")" | grep -o -E '\.[0-9]+$' | grep -o -E '[0-9]+$' | sort -nr | head -1)
+            echo previous_commit_count $previous_commit_count
+            next_commit_count=$((previous_commit_count+1))
+            echo next_commit_count $next_commit_count
+            full_service_version="${service_version}.${next_commit_count}"
           else
-            echo "Detected ${#changed_services[@]} changed service(s)."
+            full_service_version="${service_version}"
           fi
-          
-          for svc in "${changed_services[@]}"; do
-            echo "Processing service: ${svc}"
-            docker run --rm -v "$(pwd):/repo" $GITVERSION /repo /config "/repo/${svc}/.gitversion.yml"
-            gitversion_calc=$(docker run --rm -v "$(pwd):/repo" $GITVERSION /repo /config "/repo/${svc}/.gitversion.yml")
-            
-            GITVERSION_TAG_PROPERTY_NAME="GITVERSION_TAG_PROPERTY_$(echo '${{ steps.calculate_changed_services.outputs.diff_dest }}' | sed 's|/.*$||' | tr '[[:lower:]]' '[[:upper:]]')"
-            GITVERSION_TAG_PROPERTY=${!GITVERSION_TAG_PROPERTY_NAME}
-            
-            svc_without_prefix=$(echo "${svc}" | sed "s|^apps/||")
-            service_version=$(echo "${gitversion_calc}" | jq -r "[${GITVERSION_TAG_PROPERTY}] | join(\"\")")
-            
-            if [ "${GITVERSION_TAG_PROPERTY}" != ".MajorMinorPatch" ]; then
-              echo "Tagging non-main branch with filter: ^${svc_without_prefix}/v$(echo "${gitversion_calc}" | jq -r ".MajorMinorPatch")-$(echo "${gitversion_calc}" | jq -r ".PreReleaseLabel")"
-              previous_commit_count=$(git tag -l | grep "^${svc_without_prefix}/v$(echo "${gitversion_calc}" | jq -r ".MajorMinorPatch")-$(echo "${gitversion_calc}" | jq -r ".PreReleaseLabel")" | grep -o -E '\.[0-9]+$' | grep -o -E '[0-9]+$' | sort -nr | head -1)
-              next_commit_count=$((previous_commit_count+1))
-              full_service_version="${service_version}.${next_commit_count}"
-            else
-              full_service_version="${service_version}"
-            fi
-            
-            echo "Creating tag: ${svc_without_prefix}/v${full_service_version}"
-            git tag -a "${svc_without_prefix}/v${full_service_version}" -m "${svc_without_prefix}/v${full_service_version}"
-            git push origin "${svc_without_prefix}/v${full_service_version}"
-          done
-        fi
+          git tag -a "${svc_without_prefix}/v${full_service_version}" -m "${svc_without_prefix}/v${full_service_version}"
+          git push origin "${svc_without_prefix}/v${full_service_version}"
+        done
