@@ -12,7 +12,7 @@ on:
 
 env:
   GITVERSION: 'gittools/gitversion:5.10.0-alpine.3.14-6.0'
-  MAIN_BRANCHES: ("dev" "main")
+  MAIN_BRANCHES: '["dev", "main"]'
   GITVERSION_TAG_PROPERTY_PULL_REQUESTS: .SemVer
   GITVERSION_TAG_PROPERTY_DEFAULT: .SemVer
   GITVERSION_TAG_PROPERTY_DEVELOP: .MajorMinorPatch,.PreReleaseLabelWithDash
@@ -105,7 +105,7 @@ jobs:
         "https://api.github.com/repos/$OWNER/$REPO/pulls/$PR_NUMBER"
 
     - name: Tag build
-      if: ${{ github.event_name == 'push' && (startsWith(steps.calculate_changed_services.outputs.diff_dest, 'release') || startsWith(steps.calculate_changed_services.outputs.diff_dest, 'hotfix') || contains(env.MAIN_BRANCHES, steps.calculate_changed_services.outputs.diff_dest)) }}
+      if: ${{ github.event_name == 'push' && (startsWith(steps.calculate_changed_services.outputs.diff_dest, 'release') || startsWith(steps.calculate_changed_services.outputs.diff_dest, 'hotfix') || contains(fromJson(env.MAIN_BRANCHES), github.ref_name)) }}
       run: |
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         git config --global user.name "github-actions"
@@ -131,7 +131,7 @@ jobs:
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' && contains(env.MAIN_BRANCHES, github.ref_name) }}
+    if: ${{ github.event_name == 'push' && contains(fromJson(env.MAIN_BRANCHES), github.ref_name) }}
     permissions:
       contents: write
     env:
