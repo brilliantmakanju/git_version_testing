@@ -115,7 +115,8 @@ jobs:
       run: |
         BRANCH_NAME="${GITHUB_REF_NAME}"
         MAIN_BRANCHES_JSON="${{ env.MAIN_BRANCHES }}"
-        if echo "${BRANCH_NAME}" | jq -R -e ". as \$branch | \$MAIN_BRANCHES | index(\$branch)" --argjson MAIN_BRANCHES "${MAIN_BRANCHES_JSON}" > /dev/null; then
+        echo "${BRANCH_NAME}" | jq -R --argjson MAIN_BRANCHES "${MAIN_BRANCHES_JSON}" 'index($MAIN_BRANCHES[])' > /dev/null
+        if [ $? -eq 0 ]; then
           echo "Branch ${BRANCH_NAME} is in MAIN_BRANCHES"
           echo "create_release=true" >> $GITHUB_ENV
         else
