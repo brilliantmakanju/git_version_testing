@@ -113,10 +113,12 @@ jobs:
     - name: Check if the branch is in MAIN_BRANCHES
       id: check_branch
       run: |
+        echo "MAIN_BRANCHES: ${MAIN_BRANCHES}"  # Debugging: Print MAIN_BRANCHES
+        echo "BRANCH_NAME: ${GITHUB_REF_NAME}"  # Debugging: Print branch name
         BRANCH_NAME="${GITHUB_REF_NAME}"
         MAIN_BRANCHES_JSON="${{ env.MAIN_BRANCHES }}"
-        echo "${BRANCH_NAME}" | jq -R --argjson MAIN_BRANCHES "${MAIN_BRANCHES_JSON}" 'index($MAIN_BRANCHES[])' > /dev/null
-        if [ $? -eq 0 ]; then
+        echo "${MAIN_BRANCHES_JSON}" | jq .  # Debugging: Print parsed MAIN_BRANCHES_JSON
+        if echo "${BRANCH_NAME}" | jq -R --argjson MAIN_BRANCHES "${MAIN_BRANCHES_JSON}" 'index($MAIN_BRANCHES[])' > /dev/null; then
           echo "Branch ${BRANCH_NAME} is in MAIN_BRANCHES"
           echo "create_release=true" >> $GITHUB_ENV
         else
