@@ -1,0 +1,23 @@
+name: Create Release
+
+on:
+  workflow_call:
+    inputs:
+      version-increment-strategy:
+        required: false
+        type: string
+        default: 'patch'
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+    - name: Create Release
+      uses: dexwritescode/release-on-merge-action@v1
+      with:
+        version-increment-strategy: ${{ inputs.version-increment-strategy }}
+        initial-version: '1.0.0'
+        tag-prefix: 'v'
+        body: 'Automatic release created by GitHub Actions'
+        generate-release-notes: true
