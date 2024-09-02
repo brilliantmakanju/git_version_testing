@@ -121,6 +121,13 @@ jobs:
           echo "Branch ${BRANCH_NAME} is not in MAIN_BRANCHES"
           echo "create_release=false" >> $GITHUB_ENV
         fi
+        echo "create_release=${{ env.create_release }}"  # Debugging line
+
+    - name: Debug Environment Variables
+      run: |
+        echo "GITHUB_REF_NAME=${GITHUB_REF_NAME}"
+        echo "MAIN_BRANCHES=${MAIN_BRANCHES}"
+        echo "create_release=${{ env.create_release }}"
 
   create-release:
     name: Create Release
