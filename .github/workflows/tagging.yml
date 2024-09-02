@@ -9,7 +9,14 @@ on:
       - main
 
 env:
-  # (Your env variables here)
+  GITVERSION: 'gittools/gitversion:5.10.0-alpine.3.14-6.0'
+  MAIN_BRANCHES: ("dev" "main")
+  GITVERSION_TAG_PROPERTY_PULL_REQUESTS: .SemVer
+  GITVERSION_TAG_PROPERTY_DEFAULT: .SemVer
+  GITVERSION_TAG_PROPERTY_DEVELOP: .MajorMinorPatch,.PreReleaseLabelWithDash
+  GITVERSION_TAG_PROPERTY_RELEASE: .MajorMinorPatch,.PreReleaseLabelWithDash
+  GITVERSION_TAG_PROPERTY_HOTFIX: .MajorMinorPatch,.PreReleaseLabelWithDash
+  GITVERSION_TAG_PROPERTY_MAIN: .MajorMinorPatch
 
 jobs:
   tag_build:
