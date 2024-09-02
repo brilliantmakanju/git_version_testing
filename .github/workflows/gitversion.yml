@@ -1,3 +1,6 @@
+
+
+
 name: Version and Release Management
 
 on:
@@ -122,11 +125,11 @@ jobs:
           echo "create_release=false" >> $GITHUB_ENV
         fi
 
-  trigger-release:
-    name: Trigger Release Workflow
-    runs-on: ubuntu-latest
-    needs: versioning-and-release
-    if: ${{ needs.versioning-and-release.outputs.create_release == 'true' }}
-    steps:
-    - name: Trigger Release Workflow
-      uses: ./.github/workflows/create-release.yml
+    - name: Trigger Create Release Workflow
+      if: ${{ env.create_release == 'true' }}
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { exec } = require('@actions/exec');
+          await exec('gh workflow run create-release.yml --ref ${{ github.ref }}', { silent: true });
+
