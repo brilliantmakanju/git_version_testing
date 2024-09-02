@@ -131,7 +131,7 @@ jobs:
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' && contains(fromJson(env.MAIN_BRANCHES), github.ref_name) }}
+    if: ${{ github.event_name == 'push' && (contains(fromJson(env.MAIN_BRANCHES), github.ref_name)) }}
     permissions:
       contents: write
     env:
