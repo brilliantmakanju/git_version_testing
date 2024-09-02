@@ -129,7 +129,7 @@ jobs:
   trigger-create-release:
     name: Trigger Create Release Workflow
     needs: versioning-and-release
-    if: ${{ env.create_release == 'true' }}
+    if: ${{ process.env.create_release == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Create Release Workflow
