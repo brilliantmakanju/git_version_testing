@@ -114,7 +114,7 @@ jobs:
       id: check_branch
       run: |
         BRANCH_NAME="${GITHUB_REF_NAME}"
-        MAIN_BRANCHES_JSON='${{ env.MAIN_BRANCHES }}'  # Use this JSON directly
+        MAIN_BRANCHES_JSON='${{ env.MAIN_BRANCHES }}'
         echo "BRANCH_NAME: $BRANCH_NAME"
         echo "MAIN_BRANCHES: $MAIN_BRANCHES_JSON"
         echo "$BRANCH_NAME" | jq -R --argjson MAIN_BRANCHES "$MAIN_BRANCHES_JSON" 'index($MAIN_BRANCHES[])' > /dev/null
@@ -126,10 +126,34 @@ jobs:
           echo "create_release=false" >> $GITHUB_ENV
         fi
 
-    - name: Trigger Create Release Workflow
-      if: ${{ env.create_release == 'true' }}
-      uses: actions/github-script@v6
-      with:
-        script: |
-          const { exec } = require('@actions/exec');
-          await exec('gh workflow run create-release.yml --ref ${{ github.ref }}', { silent: true });
+  trigger-create-release:
+    name: Trigger Create Release Workflow
+    needs: versioning-and-release
+    if: ${{ env.create_release == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Create Release Workflow
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const response = await fetch(`https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/workflows/create-release.yml/dispatches`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${process.env.GITHUB_TOKEN}`,
+                'Accept': 'application/vnd.github+json',
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                ref: '${{ github.ref }}',
+                inputs: {
+                  version-increment-strategy: 'patch',  // Adjust as needed
+                  initial-version: '1.0.0',  // Adjust as needed
+                  tag-prefix: 'v',  // Adjust as needed
+                  body: 'Automatic release created by GitHub Actions',  // Adjust as needed
+                  generate-release-notes: 'true'  // Adjust as needed
+                }
+              })
+            });
+            if (!response.ok) {
+              throw new Error(`Failed to trigger workflow: ${response.statusText}`);
+            }
