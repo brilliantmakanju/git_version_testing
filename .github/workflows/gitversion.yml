@@ -27,7 +27,10 @@ jobs:
   versioning-and-release:
     name: Versioning and Release Management
     runs-on: ubuntu-latest
-    permissions: write-all
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     outputs:
       create_release: ${{ steps.check_branch.outputs.create_release }}
     steps:
@@ -110,11 +113,12 @@ jobs:
     - name: Check if the branch is in MAIN_BRANCHES
       id: check_branch
       run: |
-        if echo "${{ github.ref_name }}" | jq -R -e '. as $branch | $MAIN_BRANCHES | index($branch)' > /dev/null; then
-          echo "Branch ${GITHUB_REF_NAME} is in MAIN_BRANCHES"
+        BRANCH_NAME="${GITHUB_REF_NAME}"
+        if echo "${BRANCH_NAME}" | jq -R -e ". as \$branch | \$MAIN_BRANCHES | index(\$branch)" > /dev/null; then
+          echo "Branch ${BRANCH_NAME} is in MAIN_BRANCHES"
           echo "create_release=true" >> $GITHUB_ENV
         else
-          echo "Branch ${GITHUB_REF_NAME} is not in MAIN_BRANCHES"
+          echo "Branch ${BRANCH_NAME} is not in MAIN_BRANCHES"
           echo "create_release=false" >> $GITHUB_ENV
         fi
 
