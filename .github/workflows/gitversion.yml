@@ -12,7 +12,7 @@ on:
 
 env:
   GITVERSION: 'gittools/gitversion:5.10.0-alpine.3.14-6.0'
-  MAIN_BRANCHES: '["dev", "main"]'
+  MAIN_BRANCHES: '["dev", "main"]'  # Note this is now a JSON string
   GITVERSION_TAG_PROPERTY_PULL_REQUESTS: .SemVer
   GITVERSION_TAG_PROPERTY_DEFAULT: .SemVer
   GITVERSION_TAG_PROPERTY_DEVELOP: .MajorMinorPatch,.PreReleaseLabelWithDash
@@ -52,16 +52,20 @@ jobs:
           DIFF_DEST="${GITHUB_HEAD_REF}"
           DIFF_SOURCE="${GITHUB_BASE_REF}"
         fi
+        # use main as source if current branch is a release branch
         if [ "$(echo "${DIFF_DEST}" | grep -o '^release/')" = "release/" ]; then
           DIFF_SOURCE="main"
         fi
+        # use main as source if current branch is a hotfix branch
         if [ "$(echo "${DIFF_DEST}" | grep -o '^hotfix/')" = "hotfix/" ]; then
           DIFF_SOURCE="main"
         fi
+
+        # service change calculation with diff - ideally use something like 'plz' or 'bazel'
         if [ "$(git diff "${DIFF_SOURCE}" "${DIFF_DEST}" --name-only | grep -o '^common/' > /dev/null && echo 'common changed')" = 'common changed' ]; then
-          changed_services=`ls -1 apps | xargs -n 1 printf 'apps/%s\n'`
+          changed_services=$(ls -1 apps | xargs -n 1 printf 'apps/%s\n')
         else
-          changed_services=`git diff "${DIFF_SOURCE}" "${DIFF_DEST}" --name-only | grep -o '^apps/[a-zA-Z-]*' | sort | uniq`
+          changed_services=$(git diff "${DIFF_SOURCE}" "${DIFF_DEST}" --name-only | grep -o '^apps/[a-zA-Z-]*' | sort | uniq)
         fi
         changed_services=$(printf '%s' "$changed_services" | jq --raw-input --slurp '.')
         echo "changed_services=$changed_services" >> $GITHUB_OUTPUT
@@ -111,6 +115,7 @@ jobs:
         git config --global user.name "github-actions"
         changed_services=( ${{ fromJSON(steps.calculate_changed_services.outputs.changed_services) }} )
         for svc in "${changed_services[@]}"; do
+          echo "calculation for ${svc}"
           docker run --rm -v "$(pwd):/repo" ${GITVERSION} /repo /config "/repo/${svc}/.gitversion.yml"
           gitversion_calc=$(docker run --rm -v "$(pwd):/repo" ${GITVERSION} /repo /config "/repo/${svc}/.gitversion.yml")
           GITVERSION_TAG_PROPERTY_NAME="GITVERSION_TAG_PROPERTY_$(echo '${{ steps.calculate_changed_services.outputs.diff_dest }}' | sed 's|/.*$||' | tr '[[:lower:]]' '[[:upper:]]')"
@@ -127,6 +132,7 @@ jobs:
           git tag -a "${svc_without_prefix}/v${full_service_version}" -m "${svc_without_prefix}/v${full_service_version}"
           git push origin "${svc_without_prefix}/v${full_service_version}"
         done
+
 
   create-release:
     name: Create Release
