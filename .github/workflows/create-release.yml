@@ -1,22 +1,27 @@
 name: Create Release
 
 on:
-  workflow_call:
-    inputs:
-      version-increment-strategy:
-        required: false
-        type: string
-        default: 'patch'
+  push:
+    branches:
+      - main
+      - dev
+
+permissions:
+  contents: write
+  id-token: write
 
 jobs:
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
     - name: Create Release
       uses: dexwritescode/release-on-merge-action@v1
       with:
-        version-increment-strategy: ${{ inputs.version-increment-strategy }}
+        version-increment-strategy: ${{ github.event.inputs.version-increment-strategy || 'patch' }}
         initial-version: '1.0.0'
         tag-prefix: 'v'
         body: 'Automatic release created by GitHub Actions'
