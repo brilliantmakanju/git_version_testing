@@ -1,18 +1,20 @@
+name: Version and Release Management
+
 on:
-  pull_request:
-    branches:
-      - dev
-      - main
   push:
     branches:
       - dev
       - main
       - 'release/**'
       - 'hotfix/**'
+  pull_request:
+    branches:
+      - dev
+      - main
 
 env:
   GITVERSION: 'gittools/gitversion:5.10.0-alpine.3.14-6.0'
-  MAIN_BRANCHES: ("dev" "main")
+  MAIN_BRANCHES: '["dev", "main"]'  # JSON string format
   GITVERSION_TAG_PROPERTY_PULL_REQUESTS: .SemVer
   GITVERSION_TAG_PROPERTY_DEFAULT: .SemVer
   GITVERSION_TAG_PROPERTY_DEVELOP: .MajorMinorPatch,.PreReleaseLabelWithDash
@@ -21,20 +23,17 @@ env:
   GITVERSION_TAG_PROPERTY_MAIN: .MajorMinorPatch
 
 jobs:
-  gitversion:
-    name: gitversion
+  versioning-and-release:
+    name: Versioning and Release Management
     runs-on: ubuntu-latest
-    permissions: write-all
-    
+    permissions:
+      contents: write
     steps:
-    - name: Checkout
+    - name: Checkout code
       uses: actions/checkout@v2
 
     - name: Fetch all history for all tags and branches
       run: git fetch --unshallow && git checkout dev && git checkout main
-
-    #- name: Check base ref
-    #  run: echo "baseref='$GITHUB_BASE_REF' ref='$GITHUB_REF' headref='$GITHUB_HEAD_REF' refname='$GITHUB_REF_NAME' eventname='$GITHUB_EVENT_NAME'"
 
     - name: Checkout to branch
       run: |
@@ -56,27 +55,20 @@ jobs:
           DIFF_SOURCE="${GITHUB_BASE_REF}"
         fi
         # use main as source if current branch is a release branch
-        if [ "$(echo "${DIFF_DEST}" | grep -o '^release/')" = "release/" ]; then
-          DIFF_SOURCE="main"
-        fi
-        # use main as source if current branch is a hotfix branch
-        if [ "$(echo "${DIFF_DEST}" | grep -o '^hotfix/')" = "hotfix/" ]; then
+        if [[ "${DIFF_DEST}" == release/* ]] || [[ "${DIFF_DEST}" == hotfix/* ]]; then
           DIFF_SOURCE="main"
         fi
 
-        # service change calculation with diff - ideally use something like 'plz' or 'bazel'
+        # service change calculation
         if [ "$(git diff "${DIFF_SOURCE}" "${DIFF_DEST}" --name-only | grep -o '^common/' > /dev/null && echo 'common changed')" = 'common changed' ]; then
-          changed_services=ls -1 apps | xargs -n 1 printf 'apps/%s\n'
+          changed_services=$(ls -1 apps | xargs -n 1 printf 'apps/%s\n')
         else
-          changed_services=git diff "${DIFF_SOURCE}" "${DIFF_DEST}" --name-only | grep -o '^apps/[a-zA-Z-]*' | sort | uniq
+          changed_services=$(git diff "${DIFF_SOURCE}" "${DIFF_DEST}" --name-only | grep -o '^apps/[a-zA-Z-]*' | sort | uniq)
         fi
         changed_services=$(printf '%s' "$changed_services" | jq --raw-input --slurp '.')
         echo "changed_services=$changed_services" >> $GITHUB_OUTPUT
-        echo "diff_source=$DIFF_SOURCE" >> $GITHUB_OUTPUT
-        echo "diff_dest=$DIFF_DEST" >> $GITHUB_OUTPUT
-        echo "DIFF_SOURCE='$DIFF_SOURCE'"
-        echo "DIFF_DEST='$DIFF_DEST'"
-        echo "changed_services='$(echo "$changed_services" | sed 'N;s/\n/, /g')'"
+        echo "DIFF_SOURCE=$DIFF_SOURCE" >> $GITHUB_OUTPUT
+        echo "DIFF_DEST=$DIFF_DEST" >> $GITHUB_OUTPUT
 
     - name: Calculate service versions
       id: calculate_service_versions
@@ -88,7 +80,6 @@ jobs:
           service_versions_txt="## impact surface\n"
           for svc in "${changed_services[@]}"; do
             echo "calculation for ${svc}"
-            docker run --rm -v "$(pwd):/repo" ${GITVERSION} /repo /config "/repo/${svc}/.gitversion.yml"
             gitversion_calc=$(docker run --rm -v "$(pwd):/repo" ${GITVERSION} /repo /config "/repo/${svc}/.gitversion.yml")
             GITVERSION_TAG_PROPERTY_NAME="GITVERSION_TAG_PROPERTY_PULL_REQUESTS"
             GITVERSION_TAG_PROPERTY=${!GITVERSION_TAG_PROPERTY_NAME}
@@ -96,13 +87,10 @@ jobs:
             service_versions_txt+="- ${svc} - v${service_version}\n"
           done
         fi
-        # fix multiline variables
-        # from: https://github.com/actions/create-release/issues/64#issuecomment-638695206
         PR_BODY="${service_versions_txt}"
         PR_BODY=$(printf '%s' "$PR_BODY" | jq --raw-input --slurp '.')
         echo "${PR_BODY}"
         echo "PR_BODY=$PR_BODY" >> $GITHUB_OUTPUT
-
 
     - name: Update PR description
       if: ${{ github.event_name == 'pull_request' }}
@@ -110,7 +98,6 @@ jobs:
         PR_NUMBER=$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }')
         OWNER=${{ github.repository_owner }}
         REPO=$(echo ${{ github.repository }} | awk -F "/" '{print $2}')
-        # from https://github.com/actions/checkout/issues/58#issuecomment-614041550
         jq -nc '{"body": "${{ fromJSON(steps.calculate_service_versions.outputs.PR_BODY) }}" }' | \
         curl -sL -X PATCH -d @- \
         -H "Accept: application/vnd.github+json" \
@@ -118,53 +105,23 @@ jobs:
         -H "X-GitHub-Api-Version: 2022-11-28" \
         "https://api.github.com/repos/$OWNER/$REPO/pulls/$PR_NUMBER"
 
-    - name: Tag build
-      if: ${{ github.event_name == 'push' && (startsWith(steps.calculate_changed_services.outputs.diff_dest, 'release') || startsWith(steps.calculate_changed_services.outputs.diff_dest, 'hotfix') || contains(env.MAIN_BRANCHES, steps.calculate_changed_services.outputs.diff_dest)) }}
+    - name: Check if the branch is in MAIN_BRANCHES
+      id: check_branch
       run: |
-        # https://github.com/orgs/community/discussions/26560
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git config --global user.name "github-actions"
-        changed_services=( ${{ fromJSON(steps.calculate_changed_services.outputs.changed_services) }} )
-        for svc in "${changed_services[@]}"; do
-          echo "calculation for ${svc}"
-          docker run --rm -v "$(pwd):/repo" ${GITVERSION} /repo /config "/repo/${svc}/.gitversion.yml"
-          gitversion_calc=$(docker run --rm -v "$(pwd):/repo" ${GITVERSION} /repo /config "/repo/${svc}/.gitversion.yml")
-          GITVERSION_TAG_PROPERTY_NAME="GITVERSION_TAG_PROPERTY_$(echo '${{ steps.calculate_changed_services.outputs.diff_dest }}' | sed 's|/.*$||' | tr '[[:lower:]]' '[[:upper:]]')"
-          GITVERSION_TAG_PROPERTY=${!GITVERSION_TAG_PROPERTY_NAME}
-          svc_without_prefix=$(echo "${svc}" | sed "s|^apps/||")
-          service_version=$(echo "${gitversion_calc}" | jq -r "[${GITVERSION_TAG_PROPERTY}] | join(\"\")")
-          if [ "${GITVERSION_TAG_PROPERTY}" != ".MajorMinorPatch" ]; then
-            echo tag_filter "^${svc_without_prefix}/v$(echo "${gitversion_calc}" | jq -r ".MajorMinorPatch")-$(echo "${gitversion_calc}" | jq -r ".PreReleaseLabel")"
-            echo tags with tag_filter "$(git tag -l | grep "^${svc_without_prefix}/v$(echo "${gitversion_calc}" | jq -r ".MajorMinorPatch")-$(echo "${gitversion_calc}" | jq -r ".PreReleaseLabel")")"
-            echo tags grepped on commit count "$(git tag -l | grep "^${svc_without_prefix}/v$(echo "${gitversion_calc}" | jq -r ".MajorMinorPatch")-$(echo "${gitversion_calc}" | jq -r ".PreReleaseLabel")" | grep -o -E '\.[0-9]+$')"
-            echo tags grepped on commit count and period removed "$(git tag -l | grep "^${svc_without_prefix}/v$(echo "${gitversion_calc}" | jq -r ".MajorMinorPatch")-$(echo "${gitversion_calc}" | jq -r ".PreReleaseLabel")" | grep -o -E '\.[0-9]+$' | grep -o -E '[0-9]+$')"
-            previous_commit_count=$(git tag -l | grep "^${svc_without_prefix}/v$(echo "${gitversion_calc}" | jq -r ".MajorMinorPatch")-$(echo "${gitversion_calc}" | jq -r ".PreReleaseLabel")" | grep -o -E '\.[0-9]+$' | grep -o -E '[0-9]+$' | sort -nr | head -1)
-            echo previous_commit_count $previous_commit_count
-            next_commit_count=$((previous_commit_count+1))
-            echo next_commit_count $next_commit_count
-            full_service_version="${service_version}.${next_commit_count}"
-          else
-            full_service_version="${service_version}"
-          fi
-          git tag -a "${svc_without_prefix}/v${full_service_version}" -m "${svc_without_prefix}/v${full_service_version}"
-          git push origin "${svc_without_prefix}/v${full_service_version}"
-        done
+        if echo "${{ github.ref_name }}" | jq -R -e '. as $branch | $MAIN_BRANCHES | index($branch)' > /dev/null; then
+          echo "Branch ${GITHUB_REF_NAME} is in MAIN_BRANCHES"
+          echo "create_release=true" >> $GITHUB_ENV
+        else
+          echo "Branch ${GITHUB_REF_NAME} is not in MAIN_BRANCHES"
+          echo "create_release=false" >> $GITHUB_ENV
+        fi
 
-
-  create-release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' && (contains(fromJson(env.MAIN_BRANCHES), github.ref_name)) }}
-    permissions:
-      contents: write
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: Create Release
-        uses: dexwritescode/release-on-merge-action@v1
-        with:
-          version-increment-strategy: ${{ github.event.inputs.version-increment-strategy || 'patch' }}
-          initial-version: '1.0.0'
-          tag-prefix: 'v'
-          body: 'Automatic release created by GitHub Actions'
-          generate-release-notes: true
+    - name: Create Release
+      if: ${{ env.create_release == 'true' }}
+      uses: dexwritescode/release-on-merge-action@v1
+      with:
+        version-increment-strategy: ${{ github.event.inputs.version-increment-strategy || 'patch' }}
+        initial-version: '1.0.0'
+        tag-prefix: 'v'
+        body: 'Automatic release created by GitHub Actions'
+        generate-release-notes: true
