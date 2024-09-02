@@ -27,8 +27,7 @@ jobs:
   versioning-and-release:
     name: Versioning and Release Management
     runs-on: ubuntu-latest
-    permissions:
-      contents: write-all
+    permissions: write-all
     outputs:
       create_release: ${{ steps.check_branch.outputs.create_release }}
     steps:
