@@ -1,0 +1,75 @@
+name: Create Release
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+      - 'hotfix/**'
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Fetch all history for all tags and branches
+        run: git fetch --unshallow
+
+      - name: Determine version bump
+        id: version_bump
+        run: |
+          # Get the current branch name
+          BRANCH_NAME="${GITHUB_REF_NAME}"
+
+          # Fetch the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 || echo "v0.0.0")
+
+          # Determine the version bump
+          if [[ "${BRANCH_NAME}" == hotfix/* ]]; then
+            VERSION_INCREMENT="patch"
+          elif [[ "${BRANCH_NAME}" == release/* ]]; then
+            VERSION_INCREMENT="minor"
+          else
+            VERSION_INCREMENT="major"
+          fi
+
+          echo "VERSION_INCREMENT=${VERSION_INCREMENT}" >> $GITHUB_ENV
+
+      - name: Generate new version
+        id: generate_version
+        run: |
+          # Determine the new version based on the increment
+          NEW_VERSION=$(docker run --rm -v "$(pwd):/repo" gittools/gitversion:5.10.0-alpine.3.14-6.0 /repo /config "/repo/.gitversion.yml" /output json | jq -r ".SemVer")
+          echo "NEW_VERSION=${NEW_VERSION}" >> $GITHUB_ENV
+
+      - name: Create Git tag
+        run: |
+          git tag -a "v${{ env.NEW_VERSION }}" -m "Release v${{ env.NEW_VERSION }}"
+          git push origin "v${{ env.NEW_VERSION }}"
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        with:
+          tag_name: "v${{ env.NEW_VERSION }}"
+          release_name: "Release v${{ env.NEW_VERSION }}"
+          body: |
+            Automated release created by GitHub Actions
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release assets (optional)
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./path-to-your-asset
+          asset_name: asset-name
+          asset_content_type: application/zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
